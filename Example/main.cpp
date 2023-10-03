@@ -17,7 +17,7 @@ std::string GetHWID( ) {
 
 int main( )
 {
-    IntertwinedAuth Auth = IntertwinedAuth( "1BsSSx8n", "b8f7769f8a25a8c340c9430be2384f97", "1.0.0" );
+    IntertwinedAuth Auth = IntertwinedAuth( "Appid", "Enckey", "Version" );
 
     if ( !Auth.Init( ) ) {
         std::cout << "Error Initiating: " << Auth.GetLastError( ) << "\n";
