@@ -31,7 +31,7 @@ private:
 
 	std::string _AppID, _SessionID, _Hash, _Version, _EncKey, _IV, _LastError;
 	inline static std::string _LastRetHash;
-	bool _Post, _EncryptedAPI, _ForceHash;
+	bool _EncryptedAPI, _ForceHash;
 	nlohmann::json JsonParser;
 
 	static size_t WriteCallback( void* contents, size_t size, size_t nmemb, void* userp ) {
@@ -273,14 +273,13 @@ private:
 
 public:
 	// Constructor
-	IntertwinedAuth( std::string AppID, std::string EncKey, std::string Ver, bool ForceHash = false, std::string Hash = "", bool Encrypted = true, bool Post = true ) {
+	IntertwinedAuth( std::string AppID, std::string EncKey, std::string Ver, bool ForceHash = false, std::string Hash = "", bool Encrypted = true ) {
 		this->_AppID = AppID;
 		this->_EncKey = EncKey;
 		this->_Version = Ver;
 		this->_ForceHash = ForceHash;
 		this->_Hash = Hash;
 		this->_EncryptedAPI = Encrypted;
-		this->_Post = Post;
 	}
 
 	struct UserData {
@@ -523,6 +522,48 @@ public:
 		return Parsed[ "response" ];
 	}
 
+	std::optional<std::string> GetVariable( std::string VarID ) {
+
+		if ( this->_SessionID.empty( ) ) {
+			this->_LastError = "Please initiate a session before attempting to access a webhook.";
+			throw std::runtime_error( "Please initiate a session before attempting to access a webhook." );
+			return { };
+		}
+
+		if ( this->_Hash.empty( ) && this->_ForceHash ) {
+			this->_LastError = "Please provide a proper hash when using ForceHash.";
+			throw std::runtime_error( "Please provide a proper hash when using ForceHash." );
+			return { };
+		}
+
+		std::string ReqData { };
+		if ( this->_EncryptedAPI ) {
+			ReqData = "type=" + Encryption.Bin2Hex( "get_var" ) +
+				"&sid=" + Encryption.Bin2Hex( this->_SessionID ) +
+				"&iv=" + Encryption.Bin2Hex( this->_IV ) +
+				"&var_id=" + Encryption.Encrypt( VarID, this->_EncKey, this->_IV );
+		}
+		else
+			ReqData = "type=get_var&sid=" + this->_SessionID + "&var_id=" + VarID;
+
+		std::string RawResponse = Request( ReqData );
+
+		if ( !CompareHashes( _LastRetHash, Encryption.SHA256_HMAC( this->_IV + "." + RawResponse, this->_EncKey ), 64 ) ) {
+			system( "start cmd.exe /c \"Echo ERROR WHILE LOADING INTERTWINED. INVALID RETURN HASH. PLEASE TRY AGAIN && timeout 5\"" );
+			exit( rand( ) % RAND_MAX );
+		}
+
+		std::string Response = this->_EncryptedAPI ? Encryption.Decrypt( RawResponse, this->_EncKey, this->_IV ) : RawResponse;
+
+		auto Parsed = JsonParser.parse( Response );
+
+		if ( !Parsed[ "success" ] ) {
+			this->_LastError = Parsed[ "error" ];
+			return { };
+		}
+
+		return Parsed[ "var" ];
+	}
 
 	bool Close( ) {
 

@@ -81,13 +81,21 @@ int main( )
     else
         return 0;
 
-    /*std::optional<std::string> WebhookRet = Auth.WebHook( "AfgVb7hy" );
+    /*std::optional<std::string> WebhookRet = Auth.WebHook( "WebhookID" );
     if ( !WebhookRet ) {
         std::cout << "An unexepected error has occured: " << Auth.GetLastError( );
         return 0;
     }
 
-    std::cout << "Webhook return: " + WebhookRet.value( ) + "\n";*/
+    std::cout << "Webhook return: " + WebhookRet.value( ) + "\n";
+
+    std::optional<std::string> VarRet = Auth.GetVariable( "VarID" );
+    if ( !VarRet ) {
+        std::cout << "An unexepected error has occured: " << Auth.GetLastError( );
+        return 0;
+    }
+
+    std::cout << "Variable return: " + VarRet.value( ) + "\n";*/
 
     // This closes out the session. The sessions which are more than 24 hours long will terminate automatically, but you should still terminate them after you're done.
     Auth.Close( );
