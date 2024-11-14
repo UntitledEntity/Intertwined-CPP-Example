@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 
 #include "Intertwined Includes\Auth.hpp"
 
@@ -14,6 +15,26 @@ std::string GetHWID( ) {
     }
     return hwid;
 }
+
+bool DownloadFileToDisk( IntertwinedAuth* Auth, std::string WHID, std::string OutDir ) {
+
+    if ( !Auth->IsInitiated( ) )
+        return false;
+
+    std::string FileContents = Auth->WebHook( WHID ).value_or( "" );
+    if ( FileContents.empty( ) )
+        return false;
+
+    std::ofstream Out( OutDir, std::ios::binary );
+    if ( !Out.is_open( ) )
+        return false;
+
+    Out.write( FileContents.data( ), FileContents.size( ) );
+
+    std::cout << "test" << std::endl;
+    return true;
+}
+
 
 int main( )
 {
@@ -105,7 +126,9 @@ int main( )
     else
         return 0;
 
-    /*std::optional<std::string> WebhookRet = Auth.WebHook( "WebhookID" );
+    /*
+    // Get webhook data and store it in a string
+    std::optional<std::string> WebhookRet = Auth.WebHook( "WebhookID" );
     if ( !WebhookRet ) {
         std::cout << "An unexepected error has occured: " << Auth.GetLastError( );
         return 0;
@@ -113,6 +136,7 @@ int main( )
 
     std::cout << "Webhook return: " + WebhookRet.value( ) + "\n";
 
+    // Access a variable and store it in a string
     std::optional<std::string> VarRet = Auth.GetVariable( "VarID" );
     if ( !VarRet ) {
         std::cout << "An unexepected error has occured: " << Auth.GetLastError( );

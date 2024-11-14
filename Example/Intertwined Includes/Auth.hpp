@@ -512,14 +512,8 @@ public:
 
 		std::string Response = this->_EncryptedAPI ? Encryption.Decrypt( RawResponse, this->_EncKey, this->_IV ) : RawResponse;
 
-		auto Parsed = JsonParser.parse( Response );
+		return Encryption.Hex2Bin( Response );
 
-		if ( !Parsed[ "success" ] ) {
-			this->_LastError = Parsed[ "error" ];
-			return { };
-		}
-
-		return Parsed[ "response" ];
 	}
 
 	std::optional<std::string> GetVariable( std::string VarID ) {
@@ -599,6 +593,10 @@ public:
 		}
 
 		return true;
+	}
+
+	bool IsInitiated( ) {
+		return !this->_SessionID.empty( );
 	}
 
 	std::string GetLastError( ) {
