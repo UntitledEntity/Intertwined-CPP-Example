@@ -31,6 +31,7 @@ private:
 
 	std::string _AppID, _SessionID, _Hash, _Version, _EncKey, _IV, _LastError;
 	inline static std::string _LastRetHash;
+	long _LastResponseCode;
 	bool _EncryptedAPI, _ForceHash;
 	nlohmann::json JsonParser;
 
@@ -76,6 +77,13 @@ private:
 		curl_easy_setopt( curl, CURLOPT_WRITEDATA, &to_return );
 
 		auto code = curl_easy_perform( curl );
+
+		curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &_LastResponseCode );
+
+		if ( _LastResponseCode == 429 ) {
+			system( "start cmd.exe /c \"Echo TOO MANY REQUESTS. TRY AGAIN LATER. && timeout 5\"" );
+			exit( rand( ) % RAND_MAX );
+		}
 
 		if ( code != CURLE_OK )
 			MessageBoxA( 0, curl_easy_strerror( code ), 0, MB_ICONERROR );
@@ -226,7 +234,7 @@ private:
 		}
 
 		std::string Encrypt( std::string PlainText, std::string Key, std::string IV ) {
-			return EncryptStr( PlainText, SHA256( Key ).substr( 0, 32 ), SHA256( IV ).substr( 0, 16 ) );
+			return EncryptStr( PlainText , SHA256( Key ).substr( 0, 32 ), SHA256( IV ).substr( 0, 16 ) );
 		}
 
 		std::string Decrypt( std::string Encrypted, std::string Key, std::string IV ) {
@@ -513,7 +521,7 @@ public:
 		std::string Response = this->_EncryptedAPI ? Encryption.Decrypt( RawResponse, this->_EncKey, this->_IV ) : RawResponse;
 
 		return Encryption.Hex2Bin( Response );
-
+		
 	}
 
 	std::optional<std::string> GetVariable( std::string VarID ) {
