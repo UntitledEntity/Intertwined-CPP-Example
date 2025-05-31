@@ -45,9 +45,12 @@ private:
 	{
 		std::string BufStr = std::string( buffer );
 
-		if ( BufStr.substr( 0, 10 ) == "returnhash" ) {
-			_LastRetHash = std::string( BufStr.erase( BufStr.find( "returnhash: " ), 12 ) ).substr( 0, 64 );
+		if ( BufStr.substr( 0, 10 ) == "Returnhash" ) {
+			_LastRetHash = std::string( BufStr.erase( BufStr.find( "Returnhash: " ), 12 ) ).substr( 0, 64 );
 		}
+
+		// Debugging
+		// std::cout << "Header: " << std::string( buffer, size * nitems ) << std::endl;
 
 		return nitems * size;
 	}
@@ -326,6 +329,12 @@ public:
 			ReqData = "type=init&appid=" + this->_AppID + "&hash=" + this->_Hash;
 
 		std::string RawResponse = Request( ReqData );
+
+		// Only have this in init because if it's not giving a rethash, it'll be IDed in this function. No need to have the repetitive code.
+		if ( !_LastRetHash.length( ) ) {
+			system( "start cmd.exe /c \"Echo ERROR WHILE LOADING INTERTWINED. NO RETURN HASH. PLEASE TRY AGAIN && timeout 5\"" );
+			exit( rand( ) % RAND_MAX );
+		}
 
 		if ( !CompareHashes( _LastRetHash, Encryption.SHA256_HMAC( this->_IV + "." + RawResponse, this->_EncKey ), 64 ) ) {
 			system( "start cmd.exe /c \"Echo ERROR WHILE LOADING INTERTWINED. INVALID RETURN HASH. PLEASE TRY AGAIN && timeout 5\"" );
