@@ -45,6 +45,15 @@ private:
 	{
 		std::string BufStr = std::string( buffer );
 
+		/*
+		For some reason the 'returnhash' header sometimes gets transmitted as 'Returnhash' occasionally? 
+		Effect of encoding/encryption? makes no sense.
+		*/
+
+		if ( BufStr.substr( 0, 10 ) == "returnhash" ) {
+			_LastRetHash = std::string( BufStr.erase( BufStr.find( "returnhash: " ), 12 ) ).substr( 0, 64 );
+		}
+		
 		if ( BufStr.substr( 0, 10 ) == "Returnhash" ) {
 			_LastRetHash = std::string( BufStr.erase( BufStr.find( "Returnhash: " ), 12 ) ).substr( 0, 64 );
 		}
@@ -330,7 +339,6 @@ public:
 
 		std::string RawResponse = Request( ReqData );
 
-		// Only have this in init because if it's not giving a rethash, it'll be IDed in this function. No need to have the repetitive code.
 		if ( !_LastRetHash.length( ) ) {
 			system( "start cmd.exe /c \"Echo ERROR WHILE LOADING INTERTWINED. NO RETURN HASH. PLEASE TRY AGAIN && timeout 5\"" );
 			exit( rand( ) % RAND_MAX );
