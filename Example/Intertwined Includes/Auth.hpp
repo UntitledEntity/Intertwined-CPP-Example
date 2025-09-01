@@ -22,6 +22,7 @@
 #include <cryptopp/base64.h>
 #include <cryptopp/filters.h>
 #include <cryptopp/modes.h>
+#include <cryptopp/gcm.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/ccm.h>
 #include <cryptopp/rng.h>
@@ -46,20 +47,20 @@ private:
 		std::string BufStr = std::string( buffer );
 
 		/*
-		For some reason the 'returnhash' header sometimes gets transmitted as 'Returnhash' occasionally? 
+		For some reason the 'returnhash' header sometimes gets transmitted as 'Returnhash' occasionally?
 		Effect of encoding/encryption? makes no sense.
 		*/
 
 		if ( BufStr.substr( 0, 10 ) == "returnhash" ) {
 			_LastRetHash = std::string( BufStr.erase( BufStr.find( "returnhash: " ), 12 ) ).substr( 0, 64 );
 		}
-		
+
 		if ( BufStr.substr( 0, 10 ) == "Returnhash" ) {
 			_LastRetHash = std::string( BufStr.erase( BufStr.find( "Returnhash: " ), 12 ) ).substr( 0, 64 );
 		}
 
 		// Debugging
-		// std::cout << "Header: " << std::string( buffer, size * nitems ) << std::endl;
+		//std::cout << "Header: " << std::string( buffer, size * nitems ) << std::endl;
 
 		return nitems * size;
 	}
@@ -122,56 +123,82 @@ private:
 	class EncryptionClass {
 	private:
 
-		/*
-		Ret -> Binary
-		*/
-		std::string DecryptStr( const std::string& Encrytped, const std::string& Key, const std::string& IV ) {
-			std::string Ret;
+		// Returns "NONCE_HEX:TAG_HEX:CT_HEX"
+		// IV is passed as AAD
+		static std::string Encrypt_AEAD_AES256( const std::string& plaintext, const std::string& enckey, const std::string& aad = std::string( ) ) {
 
-			try {
-				CryptoPP::CBC_Mode<CryptoPP::AES>::Decryption Decryption;
-				Decryption.SetKeyWithIV( ( CryptoPP::byte* ) Key.c_str( ), Key.size( ), ( CryptoPP::byte* ) IV.c_str( ) );
+			CryptoPP::SecByteBlock key = Key32( enckey );
 
-				CryptoPP::StringSource Decryptor( Encrytped, true,
-					new CryptoPP::HexDecoder(
-						new CryptoPP::StreamTransformationFilter( Decryption,
-							new CryptoPP::StringSink( Ret )
-						)
-					)
-				);
+			CryptoPP::AutoSeededRandomPool rng;
+			CryptoPP::SecByteBlock nonce( 12 );
+			rng.GenerateBlock( nonce, nonce.size( ) );
+
+			CryptoPP::GCM<CryptoPP::AES>::Encryption enc;
+			enc.SetKeyWithIV( key, key.size( ), nonce, nonce.size( ) );
+
+			const size_t TAG_LEN = 16; // 128-bit auth tag
+			std::string ct_and_tag;
+
+			CryptoPP::AuthenticatedEncryptionFilter aef(
+				enc,
+				new CryptoPP::StringSink( ct_and_tag ),
+				false,      // putAAD = false
+				TAG_LEN
+			);
+
+			if ( !aad.empty( ) ) {
+				aef.ChannelPut( CryptoPP::AAD_CHANNEL, reinterpret_cast< const byte* >( aad.data( ) ), aad.size( ) );
+				aef.ChannelMessageEnd( CryptoPP::AAD_CHANNEL );
 			}
-			catch ( CryptoPP::Exception& ex ) {
-				throw std::runtime_error( std::string( "Error Decrypting" ) );
-				exit( -1 );
-			}
-			return Ret;
+
+			aef.ChannelPut( CryptoPP::DEFAULT_CHANNEL, reinterpret_cast< const byte* >( plaintext.data( ) ), plaintext.size( ) );
+			aef.ChannelMessageEnd( CryptoPP::DEFAULT_CHANNEL );
+
+			const size_t ct_len = ct_and_tag.size( ) - TAG_LEN;
+			const std::string ct = ct_and_tag.substr( 0, ct_len );
+			const std::string tag = ct_and_tag.substr( ct_len, TAG_LEN );
+
+			return Bin2Hex( std::string( ( const char* ) nonce.data( ), nonce.size( ) ) )
+				+ ":" + Bin2Hex( tag )
+				+ ":" + Bin2Hex( ct );
 		}
 
-		/*
-		Ret -> Hex
-		*/
-		std::string EncryptStr( std::string PlainText, std::string Key, std::string IV ) {
+		// Accepts "NONCE_HEX:TAG_HEX:CT_HEX"
+		static std::string Decrypt_AEAD_AES256( const std::string& blob_hex, const std::string& enckey, const std::string& aad = std::string( ) ) {
 
-			std::string Ret;
+			auto c1 = blob_hex.find( ':' );
+			auto c2 = ( c1 == std::string::npos ) ? std::string::npos : blob_hex.find( ':', c1 + 1 );
+			if ( c1 == std::string::npos || c2 == std::string::npos )
+				throw std::runtime_error( "Bad blob format; expected NONCE:TAG:CT" );
 
-			try {
-				CryptoPP::CBC_Mode<CryptoPP::AES>::Encryption Encryption;
-				Encryption.SetKeyWithIV( ( CryptoPP::byte* ) Key.c_str( ), Key.size( ), ( CryptoPP::byte* ) IV.c_str( ) );
+			const std::string nonce = Hex2Bin( blob_hex.substr( 0, c1 ) );
+			const std::string tag = Hex2Bin( blob_hex.substr( c1 + 1, c2 - ( c1 + 1 ) ) );
+			const std::string ct = Hex2Bin( blob_hex.substr( c2 + 1 ) );
 
-				CryptoPP::StringSource Encryptor( PlainText, true,
-					new CryptoPP::StreamTransformationFilter( Encryption,
-						new CryptoPP::HexEncoder(
-							new CryptoPP::StringSink( Ret ),
-							false
-						)
-					)
-				);
+			CryptoPP::SecByteBlock key = Key32( enckey );
+
+			CryptoPP::GCM<CryptoPP::AES>::Decryption dec;
+			dec.SetKeyWithIV( key, key.size( ),
+				reinterpret_cast< const byte* >( nonce.data( ) ), nonce.size( ) );
+
+			std::string recovered;
+			CryptoPP::AuthenticatedDecryptionFilter adf(
+				dec,
+				new CryptoPP::StringSink( recovered ),
+				CryptoPP::AuthenticatedDecryptionFilter::THROW_EXCEPTION,
+				static_cast< int >( tag.size( ) )
+			);
+
+			if ( !aad.empty( ) ) {
+				adf.ChannelPut( CryptoPP::AAD_CHANNEL, reinterpret_cast< const byte* >( aad.data( ) ), aad.size( ) );
+				adf.ChannelMessageEnd( CryptoPP::AAD_CHANNEL );
 			}
-			catch ( CryptoPP::Exception& ex ) {
-				throw std::runtime_error( std::string( "Error encrypting" ) );
-				exit( -1 );
-			}
-			return Ret;
+
+			adf.ChannelPut( CryptoPP::DEFAULT_CHANNEL, reinterpret_cast< const byte* >( ct.data( ) ), ct.size( ) );
+			adf.ChannelPut( CryptoPP::DEFAULT_CHANNEL, reinterpret_cast< const byte* >( tag.data( ) ), tag.size( ) );
+			adf.ChannelMessageEnd( CryptoPP::DEFAULT_CHANNEL );
+
+			return recovered; // throws if tag check fails
 		}
 
 	public:
@@ -245,15 +272,31 @@ private:
 
 		}
 
-		std::string Encrypt( std::string PlainText, std::string Key, std::string IV ) {
-			return EncryptStr( PlainText , SHA256( Key ).substr( 0, 32 ), SHA256( IV ).substr( 0, 16 ) );
+		static std::string B64DecodeStrict( const std::string& b64 ) {
+			std::string out;
+			CryptoPP::StringSource( b64, true,
+				new CryptoPP::Base64Decoder( new CryptoPP::StringSink( out ) ) );
+			return out;
 		}
 
-		std::string Decrypt( std::string Encrypted, std::string Key, std::string IV ) {
-			return DecryptStr( Encrypted, SHA256( Key ).substr( 0, 32 ), SHA256( IV ).substr( 0, 16 ) );
+		static CryptoPP::SecByteBlock Key32( const std::string& enckey ) {
+			std::string b = B64DecodeStrict( enckey );
+			if ( b.size( ) == 32 )
+				return CryptoPP::SecByteBlock( ( const byte* ) b.data( ), b.size( ) );
+
+			throw std::runtime_error( "Invalid EncKey; expected base64(32B)" );
+			exit( -1 );
 		}
 
-		std::string Bin2Hex( const std::string& in ) {
+		std::string Encrypt( const std::string& PlainText, const std::string& Key, const std::string& aad = "" ) {
+			return Encrypt_AEAD_AES256( PlainText, Key, aad );
+		}
+
+		std::string Decrypt( const std::string& BlobHex, const std::string& Key, const std::string& aad = "" ) {
+			return Decrypt_AEAD_AES256( BlobHex, Key, aad );
+		}
+
+		static std::string Bin2Hex( const std::string& in ) {
 			std::string Hex;
 
 			try {
@@ -272,7 +315,7 @@ private:
 			return Hex;
 		}
 
-		std::string Hex2Bin( const std::string& in ) {
+		static std::string Hex2Bin( const std::string& in ) {
 			std::string Binary;
 
 			try {
@@ -538,7 +581,7 @@ public:
 		std::string Response = this->_EncryptedAPI ? Encryption.Decrypt( RawResponse, this->_EncKey, this->_IV ) : RawResponse;
 
 		return Encryption.Hex2Bin( Response );
-		
+
 	}
 
 	std::optional<std::string> GetVariable( std::string VarID ) {
